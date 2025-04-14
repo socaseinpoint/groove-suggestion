@@ -68,6 +68,12 @@ except Exception as e:
 
 app = FastAPI()
 
+# --- Health Check Endpoint --- 
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint for Render"""
+    return {"status": "ok"}
+
 # Define the expected input parameters using Pydantic
 class GenerateParams(BaseModel):
     style: str = "dusty"
