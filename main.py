@@ -267,238 +267,223 @@ async def generate_endpoint(params: GenerateParams, background_tasks: Background
         debug_print(1, f"Final structure data: {structure_data}")
         debug_print(1, f"Total beats: {total_beats}")
 
-        # --- Generate Unique Filename and Paths ---
+        # --- Generate Unique Filename ---
         unique_id = uuid.uuid4()
         base_filename = f"groove_{selected_style}_{params.bpm}bpm_{unique_id}"
 
-        try:
-            # Create a temporary directory managed by FastAPI/Starlette
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir_path = Path(tmpdir)
-                midi_output_path = tmpdir_path / f"{base_filename}.mid"
-                wav_output_path = tmpdir_path / f"{base_filename}.wav"
+        # --- Create Temporary Files Explicitly ---
+        midi_temp_file = None
+        wav_temp_file = None
+        midi_output_path = None
+        wav_output_path = None
 
-                debug_print(1, f"Generating MIDI in: {tmpdir_path}")
+        try: # Outer try for the whole generation process
+            # Create named temporary files that won't be deleted automatically
+            # Suffix is important for debugging and potential type detection
+            # Use 'w+b' mode if needed, but saving functions might handle this
+            midi_temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mid")
+            wav_temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            
+            midi_output_path = Path(midi_temp_file.name)
+            wav_output_path = Path(wav_temp_file.name)
+            
+            # Close the file handles immediately so other processes can write to them
+            midi_temp_file.close()
+            wav_temp_file.close()
 
-                # --- Call Groove Generation ---
-                try:
-                    debug_print(1, "Calling generate_multi_drum_groove...")
-                    
-                    # Log important parameters
-                    debug_print(2, f"Style: {selected_style}")
-                    debug_print(2, f"BPM: {params.bpm}")
-                    debug_print(2, f"Structure (length): {len(structure_data)}")
-                    debug_print(2, f"Default included drums: {default_included_drums}")
-                    deep_perc = params.deep_perc_instruments.split(',') if params.deep_perc_instruments else None
-                    debug_print(2, f"Deep perc instruments: {deep_perc}")
-                    evolve = params.evolve_instruments.split(',') if params.evolve_instruments else None
-                    debug_print(2, f"Evolve instruments: {evolve}")
-                    
-                    midi_data = generate_multi_drum_groove(
-                        style=selected_style,
-                        bpm=params.bpm,
-                        structure=structure_data,
-                        default_included_drums=default_included_drums, # Pass this along
-                        verbosity=1, # Or configure based on API request?
-                        phrase_length_bars=params.phrase_length_bars,
-                        deep_perc_instruments=deep_perc,
-                        deep_perc_prob_start=params.deep_perc_prob_start,
-                        deep_perc_prob_end=params.deep_perc_prob_end,
-                        deep_perc_vel_start=params.deep_perc_vel_start,
-                        deep_perc_vel_end=params.deep_perc_vel_end,
-                        deep_perc_timing_ms_start=params.deep_perc_timing_ms_start,
-                        deep_perc_timing_ms_end=params.deep_perc_timing_ms_end,
-                        predictability=params.predictability,
-                        evolve_instruments=evolve,
-                        evolve_param=params.evolve_param,
-                        evolve_start=params.evolve_start,
-                        evolve_end=params.evolve_end,
-                        adherence=params.adherence
-                    )
-                    debug_print(1, "MIDI data generation complete")
+            debug_print(1, f"Created temporary MIDI file: {midi_output_path}")
+            debug_print(1, f"Created temporary WAV file: {wav_output_path}")
+
+            # --- Call Groove Generation ---
+            try:
+                debug_print(1, "Calling generate_multi_drum_groove...")
                 
-                except Exception as e:
-                    debug_print(1, f"ERROR in generate_multi_drum_groove: {e}")
-                    traceback.print_exc()
-                    raise HTTPException(status_code=500, detail=f"Error in MIDI generation: {e}")
+                # Log important parameters
+                debug_print(2, f"Style: {selected_style}")
+                debug_print(2, f"BPM: {params.bpm}")
+                debug_print(2, f"Structure (length): {len(structure_data)}")
+                debug_print(2, f"Default included drums: {default_included_drums}")
+                deep_perc = params.deep_perc_instruments.split(',') if params.deep_perc_instruments else None
+                debug_print(2, f"Deep perc instruments: {deep_perc}")
+                evolve = params.evolve_instruments.split(',') if params.evolve_instruments else None
+                debug_print(2, f"Evolve instruments: {evolve}")
+                
+                midi_data = generate_multi_drum_groove(
+                    style=selected_style,
+                    bpm=params.bpm,
+                    structure=structure_data,
+                    default_included_drums=default_included_drums,
+                    verbosity=1,
+                    phrase_length_bars=params.phrase_length_bars,
+                    deep_perc_instruments=deep_perc,
+                    deep_perc_prob_start=params.deep_perc_prob_start,
+                    deep_perc_prob_end=params.deep_perc_prob_end,
+                    deep_perc_vel_start=params.deep_perc_vel_start,
+                    deep_perc_vel_end=params.deep_perc_vel_end,
+                    deep_perc_timing_ms_start=params.deep_perc_timing_ms_start,
+                    deep_perc_timing_ms_end=params.deep_perc_timing_ms_end,
+                    predictability=params.predictability,
+                    evolve_instruments=evolve,
+                    evolve_param=params.evolve_param,
+                    evolve_start=params.evolve_start,
+                    evolve_end=params.evolve_end,
+                    adherence=params.adherence
+                )
+                debug_print(1, "MIDI data generation complete")
+            except Exception as e:
+                debug_print(1, f"ERROR in generate_multi_drum_groove: {e}")
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Error in MIDI generation: {e}")
 
-                if not midi_data:
-                    raise HTTPException(status_code=500, detail="MIDI generation failed internally.")
+            if not midi_data:
+                raise HTTPException(status_code=500, detail="MIDI generation failed internally (returned None).")
 
-                # --- Save MIDI File ---
-                try:
-                    midi_data.save(midi_output_path)
-                    debug_print(1, f"MIDI file saved temporarily to: {midi_output_path}")
-                except Exception as e:
-                    debug_print(1, f"Failed to save temporary MIDI file: {e}")
-                    traceback.print_exc()
-                    raise HTTPException(status_code=500, detail=f"Failed to save temporary MIDI file: {e}")
+            # --- Save MIDI File ---
+            try:
+                midi_data.save(midi_output_path)
+                debug_print(1, f"MIDI file saved temporarily to: {midi_output_path}")
+            except Exception as e:
+                debug_print(1, f"Failed to save temporary MIDI file: {e}")
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Failed to save temporary MIDI file: {e}")
 
-                # --- Prepare for WAV Rendering ---
-                try:
-                    available_kits = {
-                        "tr-909": "sounds/Roland TR-909",
-                        "tr-808": "sounds/Roland TR-808"
-                    }
-                    selected_kit_name = params.kit.lower()
-                    primary_kit_path = available_kits.get(selected_kit_name)
-
-                    # Detailed validation of sound paths
-                    debug_print(1, f"Checking sound directory: {primary_kit_path}")
-                    sound_dir_exists = os.path.isdir(primary_kit_path) if primary_kit_path else False
-                    
-                    if not sound_dir_exists:
-                        # Check if sounds/ exists at all
-                        sounds_base_dir = "sounds"
-                        if os.path.isdir(sounds_base_dir):
-                            debug_print(1, f"Base sounds directory exists. Contents:")
-                            for item in os.listdir(sounds_base_dir):
-                                debug_print(1, f"  - {item}")
-                                
-                            # Try to look for any wav files
-                            wav_files = glob.glob(f"{sounds_base_dir}/**/*.wav", recursive=True)
-                            debug_print(1, f"Found {len(wav_files)} WAV files. First 5: {wav_files[:5]}")
-                            
-                            # Check for sound directories
-                            subdirs = [f for f in os.listdir(sounds_base_dir) if os.path.isdir(os.path.join(sounds_base_dir, f))]
-                            debug_print(1, f"Sound subdirectories: {subdirs}")
-                        else:
-                            debug_print(1, "Base sounds directory does not exist")
-                        
-                        raise HTTPException(
-                            status_code=400, 
-                            detail=f"Selected kit '{params.kit}' path not found or invalid: {primary_kit_path}. Please check if sound directories are set up correctly."
-                        )
-
-                    # Additional check for WAV files in the directory - use a case-insensitive pattern
-                    wav_files_upper = glob.glob(f"{primary_kit_path}/**/*.WAV", recursive=True)
-                    wav_files_lower = glob.glob(f"{primary_kit_path}/**/*.wav", recursive=True)
-                    wav_files = wav_files_upper + wav_files_lower
-                    debug_print(1, f"Found {len(wav_files)} WAV files in {primary_kit_path}. First 5: {wav_files[:5] if wav_files else 'none'}")
-                    
-                    if not wav_files:
-                        raise HTTPException(status_code=400, detail=f"No WAV files found in the selected kit directory: {primary_kit_path}")
-
-                    # Determine fallback kit
-                    fallback_kit_path = None
-                    if selected_kit_name == "tr-909":
-                        fallback_kit_path = available_kits.get("tr-808")
-                    elif selected_kit_name == "tr-808":
-                         fallback_kit_path = available_kits.get("tr-909")
-                    if fallback_kit_path and not os.path.isdir(fallback_kit_path):
-                        debug_print(1, f"[WARNING] Fallback kit path not found: {fallback_kit_path}")
-                        fallback_kit_path = None # Disable fallback if path invalid
-
-                    # Load Samples
-                    debug_print(1, "Loading sample groups...")
-                    primary_sound_groups = group_samples_by_type(primary_kit_path, verbosity=0)
-                    debug_print(1, f"Primary sound groups: {primary_sound_groups.keys() if primary_sound_groups else 'none'}")
-                    
-                    fallback_sound_groups = None
-                    if fallback_kit_path:
-                        fallback_sound_groups = group_samples_by_type(fallback_kit_path, verbosity=0)
-                        debug_print(1, f"Fallback sound groups: {fallback_sound_groups.keys() if fallback_sound_groups else 'none'}")
-
-                    if not primary_sound_groups:
-                        raise HTTPException(status_code=500, detail=f"Failed to load primary sound groups from: {primary_kit_path}")
-                except Exception as e:
-                    debug_print(1, f"ERROR in sample preparation: {e}")
-                    traceback.print_exc()
-                    raise HTTPException(status_code=500, detail=f"Error in sample preparation: {e}")
-
-                # --- Render WAV File ---
-                try:
-                    debug_print(1, f"Rendering WAV to: {wav_output_path}")
-                    render_success = render_midi_with_sample_groups(
-                        midi_file_path=str(midi_output_path), # Needs to be string
-                        output_wav_path=str(wav_output_path), # Needs to be string
-                        primary_sound_groups=primary_sound_groups,
-                        fallback_sound_groups=fallback_sound_groups,
-                        verbosity=0, # Less verbose in API context
-                        panning_amount=params.panning,
-                        humanize_amount=params.velocity_humanize,
-                        style_preset=style_preset # Pass the loaded style preset
-                    )
-                    debug_print(1, f"WAV rendering complete: success={render_success}")
-                except Exception as e:
-                    debug_print(1, f"ERROR in WAV rendering: {e}")
-                    traceback.print_exc()
-                    raise HTTPException(status_code=500, detail=f"Error in WAV rendering: {e}")
-
-                if not render_success or not wav_output_path.exists():
-                    debug_print(1, f"WAV rendering failed or file not found at: {wav_output_path}")
-                    # Check if the MIDI file exists
-                    if midi_output_path.exists():
-                        debug_print(1, f"MIDI file exists at: {midi_output_path}")
-                        # Try to check the directory contents
-                        debug_print(1, f"Directory contents of {tmpdir_path}:")
-                        for item in tmpdir_path.iterdir():
+            # --- Prepare for WAV Rendering ---
+            try:
+                available_kits = {
+                    "tr-909": "sounds/Roland TR-909",
+                    "tr-808": "sounds/Roland TR-808"
+                }
+                selected_kit_name = params.kit.lower()
+                primary_kit_path = available_kits.get(selected_kit_name)
+                
+                # Detailed validation of sound paths
+                debug_print(1, f"Checking sound directory: {primary_kit_path}")
+                sound_dir_exists = os.path.isdir(primary_kit_path) if primary_kit_path else False
+                
+                if not sound_dir_exists:
+                    # Check if sounds/ exists at all
+                    sounds_base_dir = "sounds"
+                    if os.path.isdir(sounds_base_dir):
+                        debug_print(1, f"Base sounds directory exists. Contents:")
+                        for item in os.listdir(sounds_base_dir):
                             debug_print(1, f"  - {item}")
-                    raise HTTPException(status_code=500, detail=f"WAV rendering failed. File not found at expected path: {wav_output_path}")
-
-                # Further verify the file before returning
-                try:
-                    debug_print(1, f"Final verification of WAV file at: {wav_output_path}")
-                    if not os.path.isfile(wav_output_path):
-                        debug_print(1, f"Using os.path.isfile check: File does not exist at {wav_output_path}")
-                        raise HTTPException(status_code=500, detail=f"WAV file not found before return: {wav_output_path}")
+                            
+                        # Try to look for any wav files
+                        wav_files = glob.glob(f"{sounds_base_dir}/**/*.wav", recursive=True)
+                        debug_print(1, f"Found {len(wav_files)} WAV files. First 5: {wav_files[:5]}")
+                        
+                        # Check for sound directories
+                        subdirs = [f for f in os.listdir(sounds_base_dir) if os.path.isdir(os.path.join(sounds_base_dir, f))]
+                        debug_print(1, f"Sound subdirectories: {subdirs}")
+                    else:
+                        debug_print(1, "Base sounds directory does not exist")
                     
-                    # Get the file size to make sure it's a valid file
-                    file_size = os.path.getsize(wav_output_path)
-                    debug_print(1, f"WAV file size: {file_size} bytes")
-                    if file_size <= 0:
-                        debug_print(1, f"WAV file has zero size: {wav_output_path}")
-                        raise HTTPException(status_code=500, detail=f"WAV file has zero size: {wav_output_path}")
-                except Exception as e:
-                    debug_print(1, f"Error during final WAV file verification: {e}")
-                    raise HTTPException(status_code=500, detail=f"Error verifying WAV file: {e}")
-
-                # --- Return WAV File ---
-                # Add the cleanup task to run after the response is sent
-                background_tasks.add_task(cleanup_file, wav_output_path)
-                # Temporary MIDI is cleaned by TemporaryDirectory context manager
-
-                debug_print(1, f"Returning WAV file: {wav_output_path}")
-                try:
-                    # Make sure the file exists right before sending
-                    if not os.path.exists(wav_output_path):
-                        debug_print(1, f"FATAL ERROR: File disappeared right before sending: {wav_output_path}")
-                        raise HTTPException(status_code=500, detail="File disappeared before sending")
-
-                    return FileResponse(
-                        path=wav_output_path,
-                        filename=f"{base_filename}.wav",
-                        media_type='audio/wav'
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Selected kit '{params.kit}' path not found or invalid: {primary_kit_path}. Please check if sound directories are set up correctly."
                     )
-                except Exception as e:
-                    debug_print(1, f"Error creating FileResponse: {e}")
-                    traceback.print_exc()
-                    raise HTTPException(status_code=500, detail=f"Error creating FileResponse: {e}")
+
+                # Additional check for WAV files in the directory - use a case-insensitive pattern
+                wav_files_upper = glob.glob(f"{primary_kit_path}/**/*.WAV", recursive=True)
+                wav_files_lower = glob.glob(f"{primary_kit_path}/**/*.wav", recursive=True)
+                wav_files = wav_files_upper + wav_files_lower
+                debug_print(1, f"Found {len(wav_files)} WAV files in {primary_kit_path}. First 5: {wav_files[:5] if wav_files else 'none'}")
+                
+                if not wav_files:
+                    raise HTTPException(status_code=400, detail=f"No WAV files found in the selected kit directory: {primary_kit_path}")
+
+                # Determine fallback kit
+                fallback_kit_path = None
+                if selected_kit_name == "tr-909":
+                    fallback_kit_path = available_kits.get("tr-808")
+                elif selected_kit_name == "tr-808":
+                     fallback_kit_path = available_kits.get("tr-909")
+                if fallback_kit_path and not os.path.isdir(fallback_kit_path):
+                    debug_print(1, f"[WARNING] Fallback kit path not found: {fallback_kit_path}")
+                    fallback_kit_path = None # Disable fallback if path invalid
+
+                # Load Samples
+                debug_print(1, "Loading sample groups...")
+                primary_sound_groups = group_samples_by_type(primary_kit_path, verbosity=0)
+                debug_print(1, f"Primary sound groups: {primary_sound_groups.keys() if primary_sound_groups else 'none'}")
+                
+                fallback_sound_groups = None
+                if fallback_kit_path:
+                    fallback_sound_groups = group_samples_by_type(fallback_kit_path, verbosity=0)
+                    debug_print(1, f"Fallback sound groups: {fallback_sound_groups.keys() if fallback_sound_groups else 'none'}")
+
+                if not primary_sound_groups:
+                    raise HTTPException(status_code=500, detail=f"Failed to load primary sound groups from: {primary_kit_path}")
+            except Exception as e:
+                debug_print(1, f"ERROR in sample preparation: {e}")
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Error in sample preparation: {e}")
+
+            # --- Render WAV File ---
+            try:
+                debug_print(1, f"Rendering WAV to: {wav_output_path}")
+                render_success = render_midi_with_sample_groups(
+                    midi_file_path=str(midi_output_path), 
+                    output_wav_path=str(wav_output_path), 
+                    primary_sound_groups=primary_sound_groups,
+                    fallback_sound_groups=fallback_sound_groups,
+                    verbosity=0, 
+                    panning_amount=params.panning,
+                    humanize_amount=params.velocity_humanize,
+                    style_preset=style_preset 
+                )
+                debug_print(1, f"WAV rendering complete: success={render_success}")
+            except Exception as e:
+                debug_print(1, f"ERROR in WAV rendering: {e}")
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Error in WAV rendering: {e}")
+
+            # --- Verification ---
+            if not render_success or not wav_output_path.exists() or os.path.getsize(wav_output_path) <= 0:
+                debug_print(1, f"WAV rendering failed, file not found, or file is empty at: {wav_output_path}")
+                if midi_output_path.exists():
+                    debug_print(1, f"MIDI file exists at: {midi_output_path}")
+                else:
+                    debug_print(1, f"MIDI file also does not exist at: {midi_output_path}")
+                raise HTTPException(status_code=500, detail=f"WAV rendering failed. Expected file: {wav_output_path}")
+
+            # --- Return WAV File --- 
+            debug_print(1, f"Returning WAV file: {wav_output_path}")
+            # Add cleanup tasks for BOTH temporary files AFTER the response is sent
+            background_tasks.add_task(cleanup_file, wav_output_path)
+            background_tasks.add_task(cleanup_file, midi_output_path) 
+
+            return FileResponse(
+                path=wav_output_path,
+                filename=f"{base_filename}.wav",
+                media_type='audio/wav'
+            )
         except HTTPException:
             # Let HTTP exceptions propagate
             raise
         except Exception as e:
-            debug_print(1, f"ERROR in file processing: {e}")
+            debug_print(1, f"ERROR in sample preparation: {e}")
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Error in file processing: {e}")
+            raise HTTPException(status_code=500, detail=f"Error in sample preparation: {e}")
 
     except HTTPException as http_exc:
         # Re-raise HTTP exceptions directly
         debug_print(1, f"HTTP exception occurred: {http_exc.detail}")
+        # Clean up any created temp files if an HTTP exception occurs mid-process
+        if midi_output_path and os.path.exists(midi_output_path):
+            cleanup_file(midi_output_path)
+        if wav_output_path and os.path.exists(wav_output_path):
+            cleanup_file(wav_output_path)
         raise http_exc
-    except ValueError as ve:
-         # Catch specific ValueErrors from parsing etc.
-         debug_print(1, f"ValueError during processing: {ve}")
-         traceback.print_exc()
-         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         # Catch any other unexpected errors
-        debug_print(1, f"Unexpected error during generation: {e}")
-        # Print the full traceback
-        exc_info = sys.exc_info()
-        debug_print(1, f"Exception type: {exc_info[0]}")
-        debug_print(1, f"Exception value: {exc_info[1]}")
-        debug_print(1, f"Exception traceback: {traceback.format_tb(exc_info[2])}")
+        debug_print(1, f"Unexpected error during generation process: {e}")
+        traceback.print_exc()
+        # Clean up any created temp files on general error
+        if midi_output_path and os.path.exists(midi_output_path):
+            cleanup_file(midi_output_path)
+        if wav_output_path and os.path.exists(wav_output_path):
+            cleanup_file(wav_output_path)
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 # --- Add a function to test/debug the generation ----
